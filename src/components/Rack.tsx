@@ -94,6 +94,10 @@ const RACK_HIDDEN = new Set([
   'futbolka-zikr-korichnevaya',
   'futbolka-zikr-zelenaya',
   'dvoyka-len-white',
+  'kostyum-new-chernyy',
+  'kostyum-new-belyy-verh-chernyy-niz',
+  'kostyum-new-temno-siniy',
+  'elite-sport',
 ])
 
 /** Покачивание вещи: у каждой своя амплитуда, чтобы ряд не качался как одно целое */
