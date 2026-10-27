@@ -226,7 +226,12 @@ export function Rack() {
   const wide = railW >= 760
   const cardW = wide ? Math.round(Math.min(250, Math.max(190, railW * 0.18))) : 150
   const activeW = cardW + 28
-  const baseW = wide ? Math.max(30, Math.min(78, (railW - activeW - 120) / Math.max(1, n - 1))) : 62
+  // Вещи распределяются по всей длине штанги (с отступом от креплений по краям)
+  const usable = Math.max(0, railW - 48)
+  const idleW = wide ? Math.min(cardW * 1.1, usable / Math.max(1, n)) : 62
+  const squeezedW = wide ? Math.max(30, Math.min(idleW, (usable - activeW) / Math.max(1, n - 1))) : 62
+  // Чем больше места у вещи, тем сильнее она развёрнута к зрителю
+  const turnFor = (w: number) => Math.round(Math.min(66, Math.max(24, (Math.acos(Math.min(0.92, (w * 1.08) / cardW)) * 180) / Math.PI)))
   const current = hovered ?? null
   const total = garments.reduce((k, g) => k + g.variants.length, 0)
 
@@ -283,6 +288,7 @@ export function Rack() {
             >
               {garments.map((g, i) => {
                 const isActive = wide && current === i
+                const w = isActive ? activeW : current === null ? idleW : squeezedW
                 const dist = current === null ? 0 : Math.abs(i - current)
                 return (
                   <motion.button
@@ -295,7 +301,7 @@ export function Rack() {
                     className="relative shrink-0 snap-center outline-none [perspective:1100px] focus-visible:[&_.rack-photo]:ring-2 focus-visible:[&_.rack-photo]:ring-ink"
                     style={{ height: cardW * 0.18 + cardW * 1.68, zIndex: isActive ? 60 : 40 - dist }}
                     initial={false}
-                    animate={{ width: isActive ? activeW : baseW }}
+                    animate={{ width: w }}
                     transition={spring}
                   >
                     <motion.div
@@ -312,7 +318,7 @@ export function Rack() {
                         animate={
                           isActive
                             ? { rotateY: 0, rotateZ: [0, 1.8, -1.2, 0.6, 0], scale: 1.02 }
-                            : { rotateY: -62, rotateZ: 0, scale: 1 }
+                            : { rotateY: wide ? -turnFor(w) : -62, rotateZ: 0, scale: 1 }
                         }
                         transition={{
                           rotateY: spring,
