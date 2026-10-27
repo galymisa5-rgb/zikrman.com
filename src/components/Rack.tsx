@@ -63,15 +63,18 @@ function variantLabel(p: Product) {
 /** Вид вещи: вырезка без фона или, если её нет, обычное фото */
 export type View = { src: string; cut: Cutout | null }
 
-/** Виды товара для штанги: сначала вырезки «по пояс», потом в полный рост, без вырезок — обычные фото */
+/** Виды товара: вырезки одежды от самой чистой к менее удачной; без вырезок — обычные фото */
 export function viewsOf(p: Product): View[] {
   const cuts = p.images
     .map((src) => cutouts[src])
     .filter((c): c is Cutout => Boolean(c))
-    .map((cut) => ({ src: cut.src, cut, tall: (cut.h * (1 - cut.neck)) / cut.w > 2 }))
-  if (cuts.length) return [...cuts.filter((c) => !c.tall), ...cuts.filter((c) => c.tall)].map(({ src, cut }) => ({ src, cut }))
+    .sort((a, b) => a.rank - b.rank)
+  if (cuts.length) return cuts.map((cut) => ({ src: cut.src, cut }))
   return p.images.map((src) => ({ src, cut: null }))
 }
+
+/** На штанге — только футболки и верх костюмов (без штанов, камиса и ихрама) */
+const RACK_CATEGORIES = ['tshirts', 'sport', 'casual']
 
 function Hook({ size }: { size: number }) {
   return (
@@ -88,13 +91,13 @@ function Hook({ size }: { size: number }) {
 }
 
 /**
- * Вешалка с вещью. maxAspect — предел высоты к ширине: длинные кадры (в полный рост)
- * обрезаются снизу с мягким растворением, чтобы штанга оставалась ровной.
+ * Вешалка с вещью. maxAspect — предел высоты к ширине: слишком длинные вещи
+ * обрезаются снизу, чтобы штанга оставалась ровной.
  */
 function Hanger({
   view,
   width,
-  maxAspect = 1.9,
+  maxAspect = 1.68,
   eager,
 }: {
   view: View
@@ -118,42 +121,28 @@ function Hanger({
     )
   }
 
-  const top = cut.neck > 0
-  // Низ кадра уже растворён в самом файле вырезки, у штанов отрезана обувь
-  const aspect = (cut.h * (1 - cut.neck)) / cut.w
-  const shown = Math.min(aspect, maxAspect)
+  const shown = Math.min(cut.h / cut.w, maxAspect)
 
   return (
     <div style={{ width }} className="relative">
       <Hook size={hookSize} />
-      {top ? (
-        // Плечики: треугольная планка прячется под воротником
-        <svg
-          viewBox="0 0 100 14"
-          preserveAspectRatio="none"
-          className="absolute left-1/2 z-0 -translate-x-1/2 text-neutral-800"
-          style={{ top: hookSize * 1.1 - 2, width: '62%', height: Math.max(8, width * 0.07) }}
-          aria-hidden
-        >
-          <path d="M50 1 L97 12 Q98.5 13 96 13 L4 13 Q1.5 13 3 12 Z" fill="currentColor" />
-        </svg>
-      ) : (
-        <ClipBar />
-      )}
-      <div
-        className="relative z-10 overflow-hidden"
-        style={{
-          aspectRatio: `1 / ${shown}`,
-          marginTop: top ? Math.max(4, width * 0.035) : -2,
-        }}
+      {/* Плечики: треугольная планка уходит под воротник */}
+      <svg
+        viewBox="0 0 100 14"
+        preserveAspectRatio="none"
+        className="absolute left-1/2 z-0 -translate-x-1/2 text-neutral-800"
+        style={{ top: hookSize * 1.1 - 2, width: '58%', height: Math.max(8, width * 0.07) }}
+        aria-hidden
       >
+        <path d="M50 1 L97 12 Q98.5 13 96 13 L4 13 Q1.5 13 3 12 Z" fill="currentColor" />
+      </svg>
+      <div className="relative z-10 overflow-hidden" style={{ aspectRatio: `1 / ${shown}`, marginTop: -Math.max(4, Math.round(width * 0.04)) }}>
         <img
           src={cut.src}
           alt=""
           loading={eager ? 'eager' : 'lazy'}
           draggable={false}
           className="block w-full max-w-none"
-          style={{ marginTop: `-${((cut.neck * cut.h) / cut.w) * 100}%` }}
         />
       </div>
     </div>
@@ -169,7 +158,7 @@ function rackView(g: Garment): View {
   return viewsOf(g.variants[0])[0]
 }
 
-/** Планка с прищепками — для штанов и обычных фото */
+/** Планка с прищепками — для товаров без вырезки */
 function ClipBar() {
   return (
     <div className="relative z-20 mx-auto -mt-px h-[7px] w-[88%] rounded-full bg-gradient-to-b from-neutral-600 to-neutral-900 shadow-[0_2px_3px_rgba(0,0,0,0.25)]">
@@ -185,7 +174,7 @@ function ClipBar() {
 
 export function Rack() {
   const { products, loading } = useProducts()
-  const garments = useMemo(() => groupGarments((products ?? []).filter((p) => p.images.length > 0)), [products])
+  const garments = useMemo(() => groupGarments((products ?? []).filter((p) => p.images.length > 0 && RACK_CATEGORIES.includes(p.category))), [products])
 
   const railRef = useRef<HTMLDivElement>(null)
   const [railW, setRailW] = useState(0)
@@ -213,7 +202,7 @@ export function Rack() {
         <div className="mb-10 flex flex-wrap items-end justify-between gap-4 md:mb-14">
           <div>
             <p className="eyebrow mb-3 text-muted">Гардероб {site.brand}</p>
-            <h2 className="font-display text-3xl font-medium uppercase md:text-5xl">Вся коллекция на одной штанге</h2>
+            <h2 className="font-display text-3xl font-medium uppercase md:text-5xl">Футболки и костюмы на одной штанге</h2>
           </div>
           <p className="max-w-[30ch] text-sm text-muted">
             {wide ? 'Наведите на вещь, чтобы рассмотреть, и нажмите, чтобы открыть.' : 'Листайте штангу и нажмите на вещь.'}
@@ -227,7 +216,7 @@ export function Rack() {
           <span className="absolute top-0 right-0 z-0 h-[18px] w-2 rounded-sm bg-neutral-400" />
 
           {loading ? (
-            <div style={{ height: cardW * 0.18 + cardW * 1.95 }} />
+            <div style={{ height: cardW * 0.18 + cardW * 1.68 }} />
           ) : (
             <div
               className={
@@ -249,7 +238,7 @@ export function Rack() {
                     onFocus={() => wide && setHovered(i)}
                     onClick={() => setOpen(i)}
                     className="relative shrink-0 snap-center outline-none [perspective:1100px] focus-visible:[&_.rack-photo]:ring-2 focus-visible:[&_.rack-photo]:ring-ink"
-                    style={{ height: cardW * 0.18 + cardW * 1.95, zIndex: isActive ? 60 : 40 - dist }}
+                    style={{ height: cardW * 0.18 + cardW * 1.68, zIndex: isActive ? 60 : 40 - dist }}
                     initial={false}
                     animate={{ width: isActive ? activeW : baseW }}
                     transition={spring}
@@ -299,7 +288,7 @@ export function Rack() {
             >
               {current !== null && garments[current]
                 ? `${garments[current].title} — ${formatPrice(garments[current].variants[0].price)}`
-                : `${n} моделей · ${products?.length ?? 0} вещей`}
+                : `${n} моделей · ${garments.reduce((k, g) => k + g.variants.length, 0)} вещей`}
             </motion.p>
           </AnimatePresence>
           <button
@@ -334,7 +323,7 @@ export function Rack() {
 /** Высокие кадры (в полный рост) сужаем, чтобы вещь целиком помещалась по высоте */
 function fitWidth(view: View, width: number) {
   if (!view.cut) return width
-  const aspect = (view.cut.h * (1 - view.cut.neck)) / view.cut.w
+  const aspect = view.cut.h / view.cut.w
   return Math.round(Math.min(width, (width * 1.8) / aspect))
 }
 
