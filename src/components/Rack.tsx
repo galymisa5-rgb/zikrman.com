@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform, type MotionValue } from 'motion/react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { site } from '../config'
 import { useProducts } from '../hooks/useProducts'
@@ -44,6 +44,15 @@ export function groupGarments(products: Product[]): Garment[] {
   return [...map.values()]
 }
 
+/** Склонение: 1 вещь, 2 вещи, 5 вещей */
+function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
+}
+
 /** Чёрный или белый текст поверх цвета бирки */
 function inkOn(hex: string) {
   const h = hex.replace('#', '')
@@ -75,6 +84,26 @@ export function viewsOf(p: Product): View[] {
 
 /** На штанге — только футболки и верх костюмов (без штанов, камиса и ихрама) */
 const RACK_CATEGORIES = ['tshirts', 'sport', 'casual']
+
+/** Товары, которые не вешаем на штангу (остаются в каталоге) */
+const RACK_HIDDEN = new Set([
+  'futbolka-s-kalligrafiey-belyy-s-chernym-tekstom',
+  'futbolka-zikr-belaya',
+  'futbolka-zikr-chernaya',
+  'futbolka-zikr-bezhevaya',
+  'futbolka-zikr-korichnevaya',
+  'futbolka-zikr-zelenaya',
+  'dvoyka-len-white',
+])
+
+/** Покачивание вещи: у каждой своя амплитуда, чтобы ряд не качался как одно целое */
+function Swing({ swing, i, children }: { swing: MotionValue<number>; i: number; children: ReactNode }) {
+  const factor = 0.75 + ((i * 37) % 5) * 0.12
+  const rotate = useTransform(swing, (v) => v * factor)
+  return (
+    <motion.div style={{ rotate, transformOrigin: '50% 0%', transformStyle: 'preserve-3d' }}>{children}</motion.div>
+  )
+}
 
 function Hook({ size }: { size: number }) {
   return (
@@ -174,7 +203,11 @@ function ClipBar() {
 
 export function Rack() {
   const { products, loading } = useProducts()
-  const garments = useMemo(() => groupGarments((products ?? []).filter((p) => p.images.length > 0 && RACK_CATEGORIES.includes(p.category))), [products])
+  const garments = useMemo(() => groupGarments(
+        (products ?? []).filter(
+          (p) => p.images.length > 0 && RACK_CATEGORIES.includes(p.category) && !RACK_HIDDEN.has(p.slug),
+        ),
+      ), [products])
 
   const railRef = useRef<HTMLDivElement>(null)
   const [railW, setRailW] = useState(0)
@@ -195,6 +228,26 @@ export function Rack() {
   const activeW = cardW + 28
   const baseW = wide ? Math.max(30, Math.min(78, (railW - activeW - 120) / Math.max(1, n - 1))) : 62
   const current = hovered ?? null
+  const total = garments.reduce((k, g) => k + g.variants.length, 0)
+
+  // Вещи раскачиваются от движения: пальцем по штанге (прокрутка) или курсором над ней.
+  // push — толчок в градусах, swing — пружина с малым затуханием, она и даёт маятник.
+  const reduceMotion = useReducedMotion()
+  const push = useMotionValue(0)
+  const swing = useSpring(push, { stiffness: 120, damping: 4.5, mass: 0.8 })
+  const settle = useRef(0)
+  const last = useRef({ x: 0, t: 0 })
+  const kick = (pos: number, gain: number) => {
+    const now = performance.now()
+    const dt = now - last.current.t
+    const dx = pos - last.current.x
+    last.current = { x: pos, t: now }
+    if (reduceMotion || dt <= 0 || dt > 120) return
+    const deg = Math.max(-16, Math.min(16, (-dx / dt) * gain))
+    push.set(deg)
+    window.clearTimeout(settle.current)
+    settle.current = window.setTimeout(() => push.set(0), 70)
+  }
 
   return (
     <section id="wardrobe" className="relative overflow-hidden bg-paper pt-16 pb-10 md:pt-24 md:pb-14">
@@ -225,6 +278,8 @@ export function Rack() {
                   : '-mx-4 flex snap-x overflow-x-auto px-6 pb-2 [scrollbar-width:none] sm:-mx-6'
               }
               onMouseLeave={() => setHovered(null)}
+              onMouseMove={(e) => kick(-e.clientX, 3.5)}
+              onScroll={(e) => kick(e.currentTarget.scrollLeft, 7)}
             >
               {garments.map((g, i) => {
                 const isActive = wide && current === i
@@ -265,7 +320,9 @@ export function Rack() {
                           rotateZ: { duration: 1.4, ease: 'easeOut' },
                         }}
                       >
-                        <Hanger view={rackView(g)} width={cardW} eager={i < 8} />
+                        <Swing swing={swing} i={i}>
+                          <Hanger view={rackView(g)} width={cardW} eager={i < 8} />
+                        </Swing>
                       </motion.div>
                     </motion.div>
                   </motion.button>
@@ -288,7 +345,7 @@ export function Rack() {
             >
               {current !== null && garments[current]
                 ? `${garments[current].title} — ${formatPrice(garments[current].variants[0].price)}`
-                : `${n} моделей · ${garments.reduce((k, g) => k + g.variants.length, 0)} вещей`}
+                : `${n} ${plural(n, 'модель', 'модели', 'моделей')} · ${total} ${plural(total, 'вещь', 'вещи', 'вещей')}`}
             </motion.p>
           </AnimatePresence>
           <button
