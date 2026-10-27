@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { site } from '../config'
 import { useProducts } from '../hooks/useProducts'
 import { formatPrice, orderLink } from '../lib/format'
+import { cutouts, type Cutout } from '../data/cutouts'
 import type { Product } from '../lib/types'
 import { ArrowLeft, ArrowRight, CloseIcon } from './Icons'
 
@@ -56,37 +57,124 @@ function variantLabel(p: Product) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Вешалка: крючок, планка с прищепками и фото                         */
+/* Вешалка: вещь без фона висит на крючке                               */
 /* ------------------------------------------------------------------ */
 
-function Hanger({ product, width, eager }: { product: Product; width: number; eager?: boolean }) {
+/** Вид вещи: вырезка без фона или, если её нет, обычное фото */
+export type View = { src: string; cut: Cutout | null }
+
+/** Виды товара для штанги: сначала вырезки «по пояс», потом в полный рост, без вырезок — обычные фото */
+export function viewsOf(p: Product): View[] {
+  const cuts = p.images
+    .map((src) => cutouts[src])
+    .filter((c): c is Cutout => Boolean(c))
+    .map((cut) => ({ src: cut.src, cut, tall: (cut.h * (1 - cut.neck)) / cut.w > 2 }))
+  if (cuts.length) return [...cuts.filter((c) => !c.tall), ...cuts.filter((c) => c.tall)].map(({ src, cut }) => ({ src, cut }))
+  return p.images.map((src) => ({ src, cut: null }))
+}
+
+function Hook({ size }: { size: number }) {
+  return (
+    <svg viewBox="0 0 40 44" style={{ width: size, height: size * 1.1 }} className="mx-auto block text-neutral-500" aria-hidden>
+      <path
+        d="M20 44 V24 C20 16 30 15 30 8.5 C30 3 24.5 0.5 20 3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
+ * Вешалка с вещью. maxAspect — предел высоты к ширине: длинные кадры (в полный рост)
+ * обрезаются снизу с мягким растворением, чтобы штанга оставалась ровной.
+ */
+function Hanger({
+  view,
+  width,
+  maxAspect = 1.9,
+  eager,
+}: {
+  view: View
+  width: number
+  maxAspect?: number
+  eager?: boolean
+}) {
+  const hookSize = Math.max(26, Math.round(width * 0.16))
+  const { cut } = view
+
+  // Нет вырезки — обычное фото в рамке, как раньше
+  if (!cut) {
+    return (
+      <div style={{ width }} className="relative">
+        <Hook size={hookSize} />
+        <ClipBar />
+        <div className="relative -mt-0.5 overflow-hidden bg-stone" style={{ aspectRatio: '2 / 3' }}>
+          <img src={view.src} alt="" loading={eager ? 'eager' : 'lazy'} draggable={false} className="h-full w-full object-cover object-top" />
+        </div>
+      </div>
+    )
+  }
+
+  const top = cut.neck > 0
+  // Низ кадра уже растворён в самом файле вырезки, у штанов отрезана обувь
+  const aspect = (cut.h * (1 - cut.neck)) / cut.w
+  const shown = Math.min(aspect, maxAspect)
+
   return (
     <div style={{ width }} className="relative">
-      {/* Крючок */}
-      <svg viewBox="0 0 40 40" className="mx-auto block h-10 w-10 text-neutral-500" aria-hidden>
-        <path
-          d="M20 40 V22 C20 14 30 13 30 7 C30 2 24 0 20 2.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-        />
-      </svg>
-      {/* Планка */}
-      <div className="relative z-10 mx-auto -mt-px h-[7px] w-[92%] rounded-full bg-gradient-to-b from-neutral-600 to-neutral-900 shadow-[0_2px_3px_rgba(0,0,0,0.25)]">
-        <span className="absolute top-[3px] left-[12%] h-4 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
-        <span className="absolute top-[3px] right-[12%] h-4 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
-      </div>
-      {/* Фото */}
-      <div className="relative -mt-0.5 aspect-[2/3] overflow-hidden bg-stone shadow-[0_24px_40px_-24px_rgba(0,0,0,0.45)]">
+      <Hook size={hookSize} />
+      {top ? (
+        // Плечики: треугольная планка прячется под воротником
+        <svg
+          viewBox="0 0 100 14"
+          preserveAspectRatio="none"
+          className="absolute left-1/2 z-0 -translate-x-1/2 text-neutral-800"
+          style={{ top: hookSize * 1.1 - 2, width: '62%', height: Math.max(8, width * 0.07) }}
+          aria-hidden
+        >
+          <path d="M50 1 L97 12 Q98.5 13 96 13 L4 13 Q1.5 13 3 12 Z" fill="currentColor" />
+        </svg>
+      ) : (
+        <ClipBar />
+      )}
+      <div
+        className="relative z-10 overflow-hidden"
+        style={{
+          aspectRatio: `1 / ${shown}`,
+          marginTop: top ? Math.max(4, width * 0.035) : -2,
+        }}
+      >
         <img
-          src={product.images[0]}
+          src={cut.src}
           alt=""
           loading={eager ? 'eager' : 'lazy'}
           draggable={false}
-          className="h-full w-full object-cover object-top"
+          className="block w-full max-w-none"
+          style={{ marginTop: `-${((cut.neck * cut.h) / cut.w) * 100}%` }}
         />
       </div>
+    </div>
+  )
+}
+
+/** Вид для штанги: первый вариант цвета, у которого есть вырезка */
+function rackView(g: Garment): View {
+  for (const v of g.variants) {
+    const first = viewsOf(v)[0]
+    if (first?.cut) return first
+  }
+  return viewsOf(g.variants[0])[0]
+}
+
+/** Планка с прищепками — для штанов и обычных фото */
+function ClipBar() {
+  return (
+    <div className="relative z-20 mx-auto -mt-px h-[7px] w-[88%] rounded-full bg-gradient-to-b from-neutral-600 to-neutral-900 shadow-[0_2px_3px_rgba(0,0,0,0.25)]">
+      <span className="absolute top-[3px] left-[10%] h-4 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
+      <span className="absolute top-[3px] right-[10%] h-4 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
     </div>
   )
 }
@@ -139,7 +227,7 @@ export function Rack() {
           <span className="absolute top-0 right-0 z-0 h-[18px] w-2 rounded-sm bg-neutral-400" />
 
           {loading ? (
-            <div style={{ height: 40 + cardW * 1.5 }} />
+            <div style={{ height: cardW * 0.18 + cardW * 1.95 }} />
           ) : (
             <div
               className={
@@ -161,7 +249,7 @@ export function Rack() {
                     onFocus={() => wide && setHovered(i)}
                     onClick={() => setOpen(i)}
                     className="relative shrink-0 snap-center outline-none [perspective:1100px] focus-visible:[&_.rack-photo]:ring-2 focus-visible:[&_.rack-photo]:ring-ink"
-                    style={{ height: 46 + cardW * 1.5, zIndex: isActive ? 60 : 40 - dist }}
+                    style={{ height: cardW * 0.18 + cardW * 1.95, zIndex: isActive ? 60 : 40 - dist }}
                     initial={false}
                     animate={{ width: isActive ? activeW : baseW }}
                     transition={spring}
@@ -188,7 +276,7 @@ export function Rack() {
                           rotateZ: { duration: 1.4, ease: 'easeOut' },
                         }}
                       >
-                        <Hanger product={g.variants[0]} width={cardW} eager={i < 8} />
+                        <Hanger view={rackView(g)} width={cardW} eager={i < 8} />
                       </motion.div>
                     </motion.div>
                   </motion.button>
@@ -243,6 +331,25 @@ export function Rack() {
 /* Крупный просмотр одной вещи                                         */
 /* ------------------------------------------------------------------ */
 
+/** Высокие кадры (в полный рост) сужаем, чтобы вещь целиком помещалась по высоте */
+function fitWidth(view: View, width: number) {
+  if (!view.cut) return width
+  const aspect = (view.cut.h * (1 - view.cut.neck)) / view.cut.w
+  return Math.round(Math.min(width, (width * 1.8) / aspect))
+}
+
+/** Ширина вещи в крупном просмотре: влезает в экран по высоте и ширине */
+function useLookWidth() {
+  const calc = () => Math.round(Math.min(window.innerWidth * 0.62, (window.innerHeight - 300) / 1.95, 380))
+  const [w, setW] = useState(calc)
+  useEffect(() => {
+    const on = () => setW(calc())
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return Math.max(170, w)
+}
+
 function Look({
   garments,
   index,
@@ -260,8 +367,9 @@ function Look({
   const [dir, setDir] = useState(0)
   const closeRef = useRef<HTMLButtonElement>(null)
   const product = g.variants[Math.min(variant, g.variants.length - 1)]
-  const views = product.images.slice(0, 4)
-  const image = views[Math.min(view, views.length - 1)]
+  const views = viewsOf(product).slice(0, 5)
+  const current = views[Math.min(view, views.length - 1)]
+  const lookW = useLookWidth()
 
   const go = useCallback(
     (d: number) => {
@@ -316,7 +424,7 @@ function Look({
       role="dialog"
       aria-modal="true"
       aria-label={g.title}
-      className="fixed inset-0 z-[90] flex flex-col bg-paper/85 backdrop-blur-xl"
+      className="fixed inset-0 z-[90] flex flex-col bg-paper/95 backdrop-blur-xl"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -365,40 +473,27 @@ function Look({
               exit={{ opacity: 0, x: dir * -120 }}
               transition={{ duration: 0.6, ease }}
             >
-              <div style={{ width: 'min(64vw, calc((100svh - 330px) * 2 / 3), 400px)' }}>
-                <svg viewBox="0 0 40 40" className="mx-auto block h-10 w-10 text-neutral-500" aria-hidden>
-                  <path
-                    d="M20 40 V22 C20 14 30 13 30 7 C30 2 24 0 20 2.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="relative z-10 mx-auto -mt-px h-2 w-[92%] rounded-full bg-gradient-to-b from-neutral-600 to-neutral-900 shadow-[0_2px_3px_rgba(0,0,0,0.25)]">
-                  <span className="absolute top-1 left-[12%] h-5 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
-                  <span className="absolute top-1 right-[12%] h-5 w-[9%] rounded-[2px] bg-gradient-to-b from-neutral-400 to-neutral-600" />
-                </div>
-                <div className="relative -mt-0.5 aspect-[2/3] overflow-hidden bg-stone shadow-[0_40px_60px_-30px_rgba(0,0,0,0.5)]">
-                  <AnimatePresence initial={false}>
-                    <motion.img
-                      key={image}
-                      src={image}
-                      alt={`${product.name}, фото ${view + 1}`}
-                      className="absolute inset-0 h-full w-full object-cover object-top"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.45 }}
-                    />
-                  </AnimatePresence>
-                </div>
+              <div className="grid" style={{ width: lookW }} aria-label={`${product.name}, вид ${view + 1}`} role="img">
+                <AnimatePresence initial={false}>
+                  <motion.div
+                    key={current.src}
+                    className="[grid-area:1/1]"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.4 }}
+                  >
+                    <div className="flex justify-center">
+                      <Hanger view={current} width={fitWidth(current, lookW)} maxAspect={3} eager />
+                    </div>
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </motion.div>
           </AnimatePresence>
 
           {/* Бирки: цена и цвета */}
-          <div className="absolute top-12 right-2 flex items-start gap-1.5 md:right-auto md:left-full md:ml-5 md:gap-3">
+          <div className="absolute top-12 right-2 z-20 flex items-start gap-1.5 md:right-auto md:left-full md:ml-5 md:gap-3">
             <Tag fill="#cbb594" label={product.in_stock ? formatPrice(product.price) : 'Нет в наличии'} string={34} />
             {tags.map((t, i) => (
               <Tag
