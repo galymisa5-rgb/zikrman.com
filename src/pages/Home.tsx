@@ -9,7 +9,7 @@ import { useRef, type MouseEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, BadgeIcon, InstagramIcon, LockIcon, ReturnIcon, TruckIcon } from '../components/Icons'
 import { Marquee } from '../components/Marquee'
-import { Rack } from '../components/Rack'
+import { Runway } from '../components/Runway'
 import { AnimatedLogo } from '../components/Logo'
 import { useIntroDone } from '../components/Preloader'
 import { ProductCard, ProductGridSkeleton } from '../components/ProductCard'
@@ -23,7 +23,7 @@ export default function Home() {
   return (
     <>
       <Hero />
-      <Rack />
+      <Runway />
       <Marquee
         items={['Помни, кто ты', site.brand, 'Стиль и скромность', 'Стамбул · Бишкек', 'Одежда с намерением']}
         className="bg-ink py-4 font-display text-2xl font-light tracking-wide text-paper uppercase md:py-5 md:text-4xl"
