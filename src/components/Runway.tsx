@@ -29,6 +29,14 @@ const snapSpring = { type: 'spring', stiffness: 170, damping: 26, mass: 0.9 } as
 
 type Look = RunwayLook & { product: Product }
 
+/** Ряд закольцован: кратчайшее расстояние по кругу, со знаком (−n/2…n/2) */
+function ringDist(d: number, n: number) {
+  if (n <= 0) return d
+  const r = ((d % n) + n) % n
+  return r > n / 2 ? r - n : r
+}
+const ringIndex = (v: number, n: number) => (n ? ((Math.round(v) % n) + n) % n : 0)
+
 /** Костюмы продаются комплектом — куртка и брюки */
 const SUIT_CATEGORIES = ['casual', 'sport']
 
@@ -73,26 +81,22 @@ export function Runway() {
   const [open, setOpen] = useState(false)
   const reduceMotion = useReducedMotion()
 
-  // Начинаем с середины ряда, чтобы модели стояли по обе стороны
-  const started = useRef(false)
-  useEffect(() => {
-    if (started.current || n === 0) return
-    started.current = true
-    const mid = Math.min(n - 1, 4)
-    pos.set(mid)
-    setActive(mid)
-  }, [n, pos])
-
+  // pos не ограничен: ряд крутится по кругу, номер модели — pos по модулю n
   useMotionValueEvent(pos, 'change', (v) => {
-    const r = Math.max(0, Math.min(n - 1, Math.round(v)))
+    const r = ringIndex(v, n)
     if (r !== active) setActive(r)
   })
 
-  const goTo = (i: number) => {
-    const t = Math.max(0, Math.min(n - 1, i))
+  const slideTo = (t: number) => {
     if (reduceMotion) pos.set(t)
     else animate(pos, t, snapSpring)
   }
+  /** К модели i — кратчайшим путём по кругу */
+  const goTo = (i: number) => {
+    const base = Math.round(pos.get())
+    slideTo(base + ringDist(i - ringIndex(base, n), n))
+  }
+  const step = (k: number) => slideTo(Math.round(pos.get()) + k)
 
   useEffect(() => {
     animate(focus, open ? 1 : 0, { duration: reduceMotion ? 0 : 0.7, ease })
@@ -129,9 +133,7 @@ export function Runway() {
     const p = d.start - dx / spacing
     d.vx = (p - pos.get()) / Math.max(1, now - d.t)
     d.t = now
-    // У краёв ряда — сопротивление, как у резинки
-    const over = p < 0 ? p : p > n - 1 ? p - (n - 1) : 0
-    pos.set(p - over * 0.65)
+    pos.set(p)
   }
   const onUp = () => {
     const d = drag.current
@@ -139,7 +141,7 @@ export function Runway() {
     if (!d?.moved) return
     suppressClick.current = true
     window.setTimeout(() => (suppressClick.current = false), 0)
-    goTo(Math.round(pos.get() + d.vx * 160))
+    slideTo(Math.round(pos.get() + d.vx * 160))
   }
 
   // Горизонтальная прокрутка тачпадом
@@ -148,13 +150,13 @@ export function Runway() {
     if (open || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
     wheelAcc.current += e.deltaX
     if (Math.abs(wheelAcc.current) > 60) {
-      goTo(active + Math.sign(wheelAcc.current))
+      step(Math.sign(wheelAcc.current))
       wheelAcc.current = 0
     }
   }
 
   const current = looks[active]
-  const progressLeft = useTransform(pos, (v) => `${(Math.max(0, Math.min(n - 1, v)) / Math.max(1, n)) * 100}%`)
+  const progressLeft = useTransform(pos, (v) => `${(n ? (((v % n) + n) % n) / n : 0) * 100}%`)
 
   return (
     <section id="looks" className="relative overflow-hidden bg-[#f4f3f0] pt-14 md:pt-20">
@@ -190,6 +192,7 @@ export function Runway() {
               key={look.slug}
               look={look}
               i={i}
+              n={n}
               pos={pos}
               focus={focus}
               figH={figH}
@@ -235,9 +238,11 @@ export function Runway() {
         </div>
         <div className="flex shrink-0 gap-2">
           <button
-            onClick={() => (open ? setOpen(false) : goTo(active - 1))}
-            disabled={!open && active === 0}
-            className="grid h-11 w-11 place-items-center rounded-full border border-ink/20 transition-colors hover:bg-ink hover:text-paper disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink"
+            onClick={() => {
+              if (open) setOpen(false)
+              step(-1)
+            }}
+            className="grid h-11 w-11 place-items-center rounded-full border border-ink/20 transition-colors hover:bg-ink hover:text-paper"
             aria-label="Предыдущий образ"
           >
             <ArrowLeft size={18} />
@@ -245,10 +250,9 @@ export function Runway() {
           <button
             onClick={() => {
               if (open) setOpen(false)
-              goTo(active + 1)
+              step(1)
             }}
-            disabled={active >= n - 1}
-            className="grid h-11 w-11 place-items-center rounded-full border border-ink/20 transition-colors hover:bg-ink hover:text-paper disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink"
+            className="grid h-11 w-11 place-items-center rounded-full border border-ink/20 transition-colors hover:bg-ink hover:text-paper"
             aria-label="Следующий образ"
           >
             <ArrowRight size={18} />
@@ -266,6 +270,7 @@ export function Runway() {
 function Figure({
   look,
   i,
+  n,
   pos,
   focus,
   figH,
@@ -279,6 +284,7 @@ function Figure({
 }: {
   look: Look
   i: number
+  n: number
   pos: MotionValue<number>
   focus: MotionValue<number>
   figH: number
@@ -298,32 +304,32 @@ function Figure({
   const shrink = mobile ? 0.5 : 0.04
 
   const x = useTransform([pos, focus], ([p, f]: number[]) => {
-    const d = i - p
+    const d = ringDist(i - p, n)
     const a = Math.abs(d)
     // Дальние модели стоят теснее — как в перспективе
     const off = Math.sign(d) * spacing * (a < 1 ? a : 1 + (a - 1) * 0.74)
     return off + (Math.abs(d) < 0.5 ? shiftX * f : off * f * 0.6)
   })
   const y = useTransform([pos, focus], ([p, f]: number[]) => {
-    const a = Math.min(Math.abs(i - p), 6)
-    return -a * figH * 0.012 + (Math.abs(i - p) < 0.5 ? liftY * f : 0)
+    const a = Math.min(Math.abs(ringDist(i - p, n)), 6)
+    return -a * figH * 0.012 + (Math.abs(ringDist(i - p, n)) < 0.5 ? liftY * f : 0)
   })
   const scale = useTransform([pos, focus], ([p, f]: number[]) => {
-    const a = Math.min(Math.abs(i - p), 6)
+    const a = Math.min(Math.abs(ringDist(i - p, n)), 6)
     const base = 1 - a * 0.1
-    return Math.abs(i - p) < 0.5 ? base * (1 - shrink * f) : base
+    return Math.abs(ringDist(i - p, n)) < 0.5 ? base * (1 - shrink * f) : base
   })
   const filter = useTransform([pos, focus], ([p, f]: number[]) => {
-    const a = Math.abs(i - p)
+    const a = Math.abs(ringDist(i - p, n))
     const b = Math.min(8, Math.max(0, a - 0.2) * 1.9) + (a >= 0.5 ? f * 6 : 0)
     return b < 0.15 ? 'none' : `blur(${b.toFixed(2)}px)`
   })
   const opacity = useTransform([pos, focus], ([p, f]: number[]) => {
-    const a = Math.abs(i - p)
+    const a = Math.abs(ringDist(i - p, n))
     const base = a > 6 ? 0 : 1 - Math.max(0, a - 3.6) * 0.42
     return a < 0.5 ? base : base * (1 - f)
   })
-  const zIndex = useTransform(pos, (p) => 100 - Math.round(Math.abs(i - p) * 10))
+  const zIndex = useTransform(pos, (p) => 100 - Math.round(Math.abs(ringDist(i - p, n)) * 10))
   const visibility = useTransform(opacity, (o) => (o <= 0.01 ? 'hidden' : 'visible'))
 
   const product = look.product
